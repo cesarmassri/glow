@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>VibeCoding: Neon Pro Fixed</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background: #05050a;
+            color: #fff;
+            font-family: 'Orbitron', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #game-container { position: relative; }
+
+        /* EL HUD: Ahora es una capa superior absoluta para que NO desaparezca */
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 0;
+            width: 100%;
+            display: flex;
+            justify-content: space-around;
+            pointer-events: none; /* Para que no interfiera con los clics */
+            z-index: 5;
+            text-shadow: 0 0 10px #fff;
+        }
+
+        .stat-box { text-align: center; background: rgba(0,0,0,0.5); padding: 5px 15px; border-radius: 10px; border: 1px solid #333; }
+        .stat-label { font-size: 0.7rem; color: #888; display: block; }
+        .stat-value { font-size: 1.4rem; font-weight: 900; color: #fff; }
+
+        canvas {
+            background: #000;
+            border: 4px solid #222;
+            border-radius: 10px;
+            box-shadow: 0 0 40px rgba(0,0,0,1);
+        }
+
+        .controls { margin-top: 20px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        .buttons { display: flex; gap: 15px; }
+
+        button {
+            width: 75px; height: 75px; border: none; border-radius: 20px;
+            cursor: pointer; font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 1.2rem;
+            transition: all 0.1s; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        button span { font-size: 0.6rem; opacity: 0.7; margin-top: 5px; }
+        button:active { transform: scale(0.9); filter: brightness(1.2); }
+
+        .btn-red { background: #ff3e3e; box-shadow: 0 5px 0 #8b0000, 0 0 15px #ff3e3e; color: white; }
+        .btn-green { background: #3eff7e; box-shadow: 0 5px 0 #008b3a, 0 0 15px #3eff7e; color: #000; }
+        .btn-blue { background: #3e88ff; box-shadow: 0 5px 0 #003a8b, 0 0 15px #3e88ff; color: white; }
+
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); display: none; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 10; border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="hud">
+            <div class="stat-box">
+                <span class="stat-label">PUNTOS</span>
+                <span id="score-val" class="stat-value">0</span>
+            </div>
+            <div class="stat-box">
+                <span class="stat-label">NIVEL</span>
+                <span id="level-val" class="stat-value">1</span>
+            </div>
+        </div>
+
+        <div id="overlay">
+            <h1 style="color: #ff3e3e; font-size: 2.5rem; margin: 0;">GAME OVER</h1>
+            <p id="final-score" style="font-size: 1.2rem; margin: 20px 0;"></p>
+            <button onclick="resetGame()" style="width: auto; height: auto; padding: 15px 30px; background: #fff; color: #000; border-radius: 5px;">REINTENTAR</button>
+        </div>
+
+        <canvas id="gameCanvas" width="320" height="500"></canvas>
+    </div>
+
+    <div class="controls">
+        <div class="buttons">
+            <button class="btn-red" onclick="shoot('red')">R<span>[1]</span></button>
+            <button class="btn-green" onclick="shoot('green')">G<span>[2]</span></button>
+            <button class="btn-blue" onclick="shoot('blue')">B<span>[3]</span></button>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreVal = document.getElementById('score-val');
+    const levelVal = document.getElementById('level-val');
+    const overlay = document.getElementById('overlay');
+
+    let score = 0;
+    let balls = [];
+    let projectiles = [];
+    let isGameOver = false;
+    
+    const colors = { red: '#ff3e3e', green: '#3eff7e', blue: '#3e88ff' };
+
+    // --- AUDIO ENGINE ---
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playSound(freq, type, duration) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        if(type === 'square') osc.frequency.exponentialRampToValueAtTime(freq/2, audioCtx.currentTime + duration);
+        
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + duration);
+        
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+    }
+
+    // --- CLASES ---
+    class Ball {
+        constructor(colorName) {
+            this.x = canvas.width / 2;
+            this.y = -30;
+            this.radius = 20;
+            this.colorName = colorName;
+            this.color = colors[colorName];
+            this.speed = 1.2 + (Math.floor(score / 100) * 0.5);
+        }
+        draw() {
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            ctx.shadowBlur = 20; ctx.shadowColor = this.color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+        update() {
+            this.y += this.speed;
+            if (this.y - this.radius > canvas.height) endGame();
+        }
+    }
+
+    class Projectile {
+        constructor(colorName) {
+            this.x = canvas.width / 2;
+            this.y = canvas.height - 40;
+            this.colorName = colorName;
+            this.color = colors[colorName];
+            this.speed = 18; // Super rápido
+            this.history = [];
+        }
+        draw() {
+            this.history.forEach((pos, i) => {
+                ctx.globalAlpha = i / this.history.length;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 8, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, 12, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            ctx.shadowBlur = 25; ctx.shadowColor = this.color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+        update() {
+            this.history.push({x: this.x, y: this.y});
+            if (this.history.length > 8) this.history.shift();
+            this.y -= this.speed;
+        }
+    }
+
+    // --- LOGICA ---
+    function shoot(color) {
+        if (isGameOver) return;
+        playSound(440, 'triangle', 0.1); // Sonido disparo
+        projectiles.push(new Projectile(color));
+    }
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key === '1' || e.key.toLowerCase() === 'r') shoot('red');
+        if (e.key === '2' || e.key.toLowerCase() === 'g') shoot('green');
+        if (e.key === '3' || e.key.toLowerCase() === 'b') shoot('blue');
+    });
+
+    function endGame() {
+        isGameOver = true;
+        overlay.style.display = 'flex';
+        document.getElementById('final-score').innerText = `CONSEGUISTE ${score} PUNTOS`;
+    }
+
+    function resetGame() {
+        score = 0; balls = []; projectiles = []; isGameOver = false;
+        overlay.style.display = 'none';
+        scoreVal.innerText = "0"; levelVal.innerText = "1";
+    }
+
+    function gameLoop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Dibujar Canal
+        ctx.fillStyle = '#111';
+        ctx.fillRect(canvas.width/2 - 30, 0, 60, canvas.height);
+
+        if (!isGameOver) {
+            if (Math.random() < 0.02) {
+                const c = ['red', 'green', 'blue'][Math.floor(Math.random()*3)];
+                if(balls.length === 0 || balls[balls.length-1].y > 80) balls.push(new Ball(c));
+            }
+
+            balls.forEach((b, bi) => {
+                b.update();
+                b.draw();
+            });
+
+            projectiles.forEach((p, pi) => {
+                p.update();
+                p.draw();
+
+                // Colisión con la bola más baja
+                let target = null;
+                let lowestY = -1;
+                balls.forEach(b => {
+                    if(b.y > lowestY && b.y < p.y) { lowestY = b.y; target = b; }
+                });
+
+                if (target && Math.abs(p.y - target.y) < 30) {
+                    if (p.colorName === target.colorName) {
+                        playSound(600, 'square', 0.1); // Sonido ¡Pop!
+                        balls.splice(balls.indexOf(target), 1);
+                        score += 10;
+                        scoreVal.innerText = score;
+                        levelVal.innerText = 1 + Math.floor(score/100);
+                    } else {
+                        playSound(150, 'sawtooth', 0.2); // Sonido Error
+                        target.y += 50; // Castigo
+                    }
+                    projectiles.splice(pi, 1);
+                }
+                if (p.y < -50) projectiles.splice(pi, 1);
+            });
+        }
+        requestAnimationFrame(gameLoop);
+    }
+
+    gameLoop();
+</script>
+</body>
+</html>
