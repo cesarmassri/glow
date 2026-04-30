@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta charset="UTF-8">
     <title>VibeCoding: Neon Pro Fixed</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;900&display=swap" rel="stylesheet">
@@ -64,6 +65,28 @@
             background: rgba(0,0,0,0.9); display: none; flex-direction: column;
             align-items: center; justify-content: center; z-index: 10; border-radius: 10px;
         }
+        
+        body {
+            /* Evita que la pantalla rebote o se deslice al jugar */
+            touch-action: none; 
+            overflow: hidden;
+            /* Evita que se seleccione texto al tocar rápido */
+            user-select: none;
+            -webkit-user-select: none;
+            /* Elimina el recuadro gris que sale en móviles al tocar botones */
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        canvas {
+            /* Hace que el canvas use el ancho disponible sin pasarse */
+            max-width: 95vw;
+            max-height: 70vh;
+            height: auto;
+        }
+
+
+
+        
     </style>
 </head>
 <body>
